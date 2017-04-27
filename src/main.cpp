@@ -20,8 +20,24 @@
 // standard X25.168 range 315 degrees at 1/3 degree steps
 #define STEPS (315*3)
 
+#define INTERRUPT_PIN 2
+
+#define GEAR_RATIO 24/43
+
+#define STEPS_PER_DEGREE 3
+
+#define DEGREE_PER_RPM 30.0/1000.0
+
 // For motors connected to digital pins 4,5,6,7
-SwitecX25 motor1(STEPS,4,5,6,7);
+SwitecX25 motor1(STEPS,5,6,7,8);
+
+unsigned long lastIntTime = 0;
+unsigned long intTime = 0;
+
+void interrupt(){
+  lastIntTime = intTime;
+  intTime = micros();
+}
 
 void setup(void)
 {
@@ -31,9 +47,9 @@ void setup(void)
   //motor1.setPosition(STEPS/2);
   
   Serial.begin(9600);
-  Serial.print("Enter a step position from 0 through ");
-  Serial.print(STEPS-1);
-  Serial.println(".");
+  Serial.println("STARTING");
+
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), interrupt, RISING); 
 }
 
 void loop(void)
@@ -44,14 +60,48 @@ void loop(void)
 
   unsigned long now = millis();
 
+  static unsigned long last_calc = now;
+
+  if(now - last_calc > 100){
+    long delta = intTime - lastIntTime; 
+    Serial.print(delta);
+    Serial.print(":");
+
+    double deltasec = delta/1000000.0; 
+    Serial.print(deltasec);
+    Serial.print(":");
+
+    double pps = 1.0/deltasec;
+    Serial.print(pps);
+    Serial.print(":");
+    
+    double ppm = pps*60.0;
+    Serial.print(ppm);
+    Serial.print(":");
+    
+    double rpm = ppm/2.0;
+    Serial.print(rpm);
+    Serial.print(":");
+
+    double steps = rpm * DEGREE_PER_RPM * STEPS_PER_DEGREE * GEAR_RATIO;
+    Serial.print(steps);
+    Serial.print(":");
+
+    Serial.println();
+
+    motor1.setPosition(steps);
+
+    last_calc = now;
+  }
+
   static unsigned long last_update = now;
   static bool last_pos = false;
 
   if(now - last_update > 1000){
     if(last_pos){
-      motor1.setPosition(0);
+      //motor1.setPosition(0);
     }else{
-      motor1.setPosition(STEPS);
+      //motor1.setPosition(STEPS-1);
     }
     last_pos = !last_pos;
     last_update = now;
