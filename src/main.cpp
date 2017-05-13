@@ -14,36 +14,59 @@
 // standard X25.168 range 315 degrees at 1/3 degree steps
 #define STEPS (315*3)
 
-#define TIMEOUT 1000
+#define TIMEOUT 1000000UL
 
 #define GEAR_RATIO 24/43
 #define STEPS_PER_DEGREE 3
-#define DEGREE_PER_RPM 30.0/1000.0
+#define DEGREE_PER_RPM 32.5/1000.0
 
 // The number of pulses to average
-#define DELTAS 20
+#define DELTAS 256
+
+// Maximum allowed positive changes in delta per microsecond
+#define MAX_DELTA_ACCELERATION 0.04
+
+// Maximum allowed negitve changes in delta per microsecond
+#define MAX_DELTA_DECCELERATION -1
 
 // For motors connected to digital pins 4,5,6,7
 SwitecX25 motor1(STEPS,5,6,7,8);
 
 // Buffer for the rolling average of input pulses
-unsigned long deltas[DELTAS];
+//unsigned long deltas[DELTAS][2];
+//int index = 0;
 
-unsigned long lastIntTime = 0;
-unsigned long intTime = 0;
+unsigned long lastIntTime = 0UL;
+unsigned long intTime = 0UL;
+
+unsigned long lastValidDelta = 0UL;
+unsigned long lastValidTime = 0UL;
 
 void interrupt(){
   
-  // Only get the pulse length on the falling edge
-  // The falling edge is steeper and more accurate
-  
-  if(digitalRead(INTERRUPT_PIN)){
-    digitalWrite(LED, HIGH);
-  }else{
-    lastIntTime = intTime;
-    intTime = micros();
-    digitalWrite(LED, LOW);
+  // Falling edge
+  intTime = micros();
+
+  unsigned long delta = intTime - lastIntTime;
+
+  unsigned long change_in_time = intTime - lastValidTime;
+  long change_in_delta = delta - lastValidDelta;
+
+  long max_change_in_delta = (float)MAX_DELTA_ACCELERATION*(float)change_in_time;
+
+  if(change_in_delta > max_change_in_delta){
+    delta = lastValidDelta + max_change_in_delta;
   }
+
+  if(change_in_delta < -max_change_in_delta){
+    delta = lastValidDelta - max_change_in_delta;
+  }
+
+  lastValidDelta = delta;
+  lastValidTime = intTime;
+
+  lastIntTime = intTime;
+
 }
 
 void setup(void){
@@ -58,7 +81,26 @@ void setup(void){
   pinMode(LED, OUTPUT);
   pinMode(INTERRUPT_PIN, INPUT);
 
-  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), interrupt, CHANGE); 
+#ifdef DEBUG
+
+  digitalWrite(LED, HIGH);
+  motor1.setPosition(STEPS/2);
+  motor1.updateBlocking();
+
+  digitalWrite(LED, LOW);
+  motor1.setPosition(0);
+  motor1.updateBlocking();
+
+  digitalWrite(LED, HIGH);
+  delay(500);
+  digitalWrite(LED, LOW);
+  delay(500);
+  digitalWrite(LED, HIGH);
+  delay(500);
+  digitalWrite(LED, LOW);
+#endif // DEBUG
+
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), interrupt, FALLING); 
 }
 
 void loop(void){
@@ -71,9 +113,12 @@ void loop(void){
 
   // Do the rpm calculations and update the motor every 50ms
   if(now - last_calc > 50){
+    //noInterrupts();
 
     // Check if there was a pulse within the timeout
-    if(now - intTime < TIMEOUT){
+    if(micros() - intTime < TIMEOUT){
+    //if(true){
+      /*
       long delta = intTime - lastIntTime; 
 
       // Create a rolling average of the deltas
@@ -95,18 +140,20 @@ void loop(void){
         sum += delta;
         count++;
       }
+      */
 
-      unsigned long average_delta = sum/count;
-      double deltasec = average_delta/1000000.0; 
+      //unsigned long average_delta = sum/count;
+      //double deltasec = average_delta/1000000.0; 
+      double deltasec = lastValidDelta/1000000.0; 
       double pps = 1.0/deltasec;
       double ppm = pps*60.0;
       double rpm = ppm/2.0;
       double steps = rpm * DEGREE_PER_RPM * STEPS_PER_DEGREE * GEAR_RATIO;
 
 #ifdef DEBUG
-      Serial.print(delta);
+      Serial.print(lastValidDelta);
       Serial.print(":");
-      Serial.print(average_delta);
+      Serial.print(lastValidTime);
       Serial.print(":");
       Serial.print(rpm);
       Serial.print(":");
@@ -115,8 +162,13 @@ void loop(void){
 #endif // DEBUG
 
       motor1.setPosition(steps);
+      //interrupts();
     }else{
+      //interrupts();
       motor1.setPosition(0);
+#ifdef DEBUG
+      Serial.println("Timeout!");
+#endif // DEBUG
     }
 
     last_calc = now;
