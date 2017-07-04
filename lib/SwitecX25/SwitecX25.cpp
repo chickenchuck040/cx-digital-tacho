@@ -14,7 +14,7 @@
 // During zeroing we will step the motor CCW 
 // with a fixed step period defined by RESET_STEP_MICROSEC
 // Was 800. Changed to 12000 TIMH
-#define RESET_STEP_MICROSEC 3000
+#define RESET_STEP_MICROSEC 2400
 
 // This table defines the acceleration curve.
 // 1st value is the speed step, 2nd value is delay in microseconds

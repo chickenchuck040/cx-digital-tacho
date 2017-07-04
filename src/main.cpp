@@ -21,7 +21,7 @@
 #define DEGREE_PER_RPM 32.5/1000.0
 
 // The number of pulses to average
-#define DELTAS 256
+#define DELTAS 20
 
 // Maximum allowed positive changes in delta per microsecond
 #define MAX_DELTA_ACCELERATION 0.04
@@ -33,8 +33,7 @@
 SwitecX25 motor1(STEPS,5,6,7,8);
 
 // Buffer for the rolling average of input pulses
-//unsigned long deltas[DELTAS][2];
-//int index = 0;
+unsigned long deltas[DELTAS];
 
 unsigned long lastIntTime = 0UL;
 unsigned long intTime = 0UL;
@@ -44,28 +43,38 @@ unsigned long lastValidTime = 0UL;
 
 void interrupt(){
   
-  // Falling edge
-  intTime = micros();
+  if(digitalRead(INTERRUPT_PIN) == HIGH){
+    // Rising Edge
+    digitalWrite(13, LOW);
 
-  unsigned long delta = intTime - lastIntTime;
+    intTime = micros();
 
-  unsigned long change_in_time = intTime - lastValidTime;
-  long change_in_delta = delta - lastValidDelta;
+    // Only update if the last time was not 0 and micros did not roll over
+    if(lastIntTime != 0 && intTime > lastIntTime){
+      unsigned long delta = intTime - lastIntTime;
 
-  long max_change_in_delta = (float)MAX_DELTA_ACCELERATION*(float)change_in_time;
+      unsigned long change_in_time = intTime - lastValidTime;
+      long change_in_delta = delta - lastValidDelta;
 
-  if(change_in_delta > max_change_in_delta){
-    delta = lastValidDelta + max_change_in_delta;
+      long max_change_in_delta = (float)MAX_DELTA_ACCELERATION*(float)change_in_time;
+
+      if(change_in_delta > max_change_in_delta){
+        delta = lastValidDelta + max_change_in_delta;
+      }
+
+      if(change_in_delta < -max_change_in_delta){
+        delta = lastValidDelta - max_change_in_delta;
+      }
+
+      lastValidDelta = delta;
+      lastValidTime = intTime;
+    }
+
+    lastIntTime = intTime;
+  }else{
+    // Falling Edge
+    digitalWrite(13, HIGH);
   }
-
-  if(change_in_delta < -max_change_in_delta){
-    delta = lastValidDelta - max_change_in_delta;
-  }
-
-  lastValidDelta = delta;
-  lastValidTime = intTime;
-
-  lastIntTime = intTime;
 
 }
 
@@ -84,7 +93,7 @@ void setup(void){
 #ifdef DEBUG
 
   digitalWrite(LED, HIGH);
-  motor1.setPosition(STEPS/2);
+  motor1.setPosition(STEPS/3);
   motor1.updateBlocking();
 
   digitalWrite(LED, LOW);
@@ -100,7 +109,7 @@ void setup(void){
   digitalWrite(LED, LOW);
 #endif // DEBUG
 
-  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), interrupt, FALLING); 
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), interrupt, CHANGE); 
 }
 
 void loop(void){
@@ -115,12 +124,9 @@ void loop(void){
   if(now - last_calc > 50){
     //noInterrupts();
 
-    // Check if there was a pulse within the timeout
-    if(micros() - intTime < TIMEOUT){
-    //if(true){
-      /*
-      long delta = intTime - lastIntTime; 
-
+    // Check if there was a pulse within the timeout or micros rolled over
+    if(micros() < intTime || micros() - intTime < TIMEOUT){
+      
       // Create a rolling average of the deltas
       unsigned long sum = 0;
       unsigned long count = 0;
@@ -135,27 +141,25 @@ void loop(void){
       }
 
       // Add the most recent delta to the end
-      if(delta != 0){
-        deltas[DELTAS - 1] = delta;
-        sum += delta;
+      if(lastValidDelta != 0){
+        deltas[DELTAS - 1] = lastValidDelta;
+        sum += lastValidDelta;
         count++;
       }
-      */
 
-      //unsigned long average_delta = sum/count;
-      //double deltasec = average_delta/1000000.0; 
-      double deltasec = lastValidDelta/1000000.0; 
+      unsigned long average_delta = sum/count;
+      double deltasec = average_delta/1000000.0; 
       double pps = 1.0/deltasec;
       double ppm = pps*60.0;
       double rpm = ppm/2.0;
       double steps = rpm * DEGREE_PER_RPM * STEPS_PER_DEGREE * GEAR_RATIO;
 
 #ifdef DEBUG
-      Serial.print(lastValidDelta);
-      Serial.print(":");
-      Serial.print(lastValidTime);
+      Serial.print(average_delta);
       Serial.print(":");
       Serial.print(rpm);
+      Serial.print(":");
+      Serial.print(average_delta);
       Serial.print(":");
       Serial.print(steps);
       Serial.println();
@@ -166,6 +170,7 @@ void loop(void){
     }else{
       //interrupts();
       motor1.setPosition(0);
+      lastIntTime = 0;
 #ifdef DEBUG
       Serial.println("Timeout!");
 #endif // DEBUG
